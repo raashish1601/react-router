@@ -24,6 +24,7 @@ import {
   parseRouteExports,
   isVirtualClientRouteModuleId,
   CLIENT_NON_COMPONENT_EXPORTS,
+  stripServerOnlyExportsForClientScan,
 } from "./virtual-route-modules";
 import { loadDotenv } from "../load-dotenv";
 import { validatePluginOrder } from "../plugins/validate-plugin-order";
@@ -32,11 +33,11 @@ import { warnOnClientSourceMaps } from "../plugins/warn-on-client-source-maps";
 export function reactRouterRSCVitePlugin(): Vite.PluginOption[] {
   let runningWithinTheReactRouterMonoRepo = Boolean(
     arguments &&
-      arguments.length === 1 &&
-      typeof arguments[0] === "object" &&
-      arguments[0] &&
-      "__runningWithinTheReactRouterMonoRepo" in arguments[0] &&
-      arguments[0].__runningWithinTheReactRouterMonoRepo === true,
+    arguments.length === 1 &&
+    typeof arguments[0] === "object" &&
+    arguments[0] &&
+    "__runningWithinTheReactRouterMonoRepo" in arguments[0] &&
+    arguments[0].__runningWithinTheReactRouterMonoRepo === true,
   );
   let configLoader: ConfigLoader;
   let typegenWatcherPromise: Promise<Typegen.Watcher> | undefined;
@@ -128,6 +129,11 @@ export function reactRouterRSCVitePlugin(): Vite.PluginOption[] {
 
         // Async import here to avoid CJS warnings on the console
         let viteNormalizePath = (await import("vite")).normalizePath;
+        let routeFilesForClientScan = new Set(
+          Object.values(config.routes).map((route) =>
+            viteNormalizePath(Path.resolve(config.appDirectory, route.file)),
+          ),
+        );
 
         return {
           resolve: {
@@ -186,7 +192,18 @@ export function reactRouterRSCVitePlugin(): Vite.PluginOption[] {
               "react-router > cookie",
               "react-router > set-cookie-parser",
             ],
-          },
+            // Rolldown's optimizeDeps scanner does not run Vite environment
+            // transform hooks, so strip server-only route exports before it
+            // crawls client dependencies from route entries.
+            rolldownOptions: {
+              plugins: [
+                createClientScanRouteModulesPlugin({
+                  routeFiles: routeFilesForClientScan,
+                  viteNormalizePath,
+                }),
+              ],
+            },
+          } as Vite.DepOptimizationOptions,
           esbuild: {
             jsx: "automatic",
             jsxDev: viteCommand !== "build",
@@ -623,6 +640,23 @@ function invalidateVirtualModules(viteDevServer: Vite.ViteDevServer) {
       }
     }
   }
+}
+
+function createClientScanRouteModulesPlugin({
+  routeFiles,
+  viteNormalizePath,
+}: {
+  routeFiles: Set<string>;
+  viteNormalizePath: (path: string) => string;
+}) {
+  return {
+    name: "react-router/rsc/client-scan-route-modules",
+    transform(code: string, id: string) {
+      let fileId = viteNormalizePath(id.split("?")[0]);
+      if (!routeFiles.has(fileId)) return null;
+      return stripServerOnlyExportsForClientScan(code);
+    },
+  };
 }
 
 function getRootDirectory(viteUserConfig: Vite.UserConfig) {

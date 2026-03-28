@@ -263,12 +263,13 @@ function createVirtualClientRouteModuleCode({
 }) {
   const { staticExports, isServerFirstRoute, hasClientExports } =
     parseRouteExports(routeSource);
-  const exportsToRemove = isServerFirstRoute
-    ? [...SERVER_ONLY_ROUTE_EXPORTS, ...CLIENT_COMPONENT_EXPORTS]
-    : SERVER_ONLY_ROUTE_EXPORTS;
+  const exportsToRemove = getClientRouteModuleExportsToRemove({
+    isServerFirstRoute,
+  });
 
   const clientRouteModuleAst = babel.parse(routeSource, {
     sourceType: "module",
+    plugins: ["jsx", "typescript"],
   });
   removeExports(clientRouteModuleAst, exportsToRemove);
 
@@ -292,6 +293,28 @@ function createVirtualClientRouteModuleCode({
   }
 
   return generatorResult;
+}
+
+export function stripServerOnlyExportsForClientScan(routeSource: string) {
+  const {
+    ast: clientRouteModuleAst,
+    staticExports,
+    isServerFirstRoute,
+  } = parseRawRouteExports(routeSource);
+
+  if (
+    !isServerFirstRoute &&
+    !staticExports.some((staticExport) => isServerOnlyRouteExport(staticExport))
+  ) {
+    return null;
+  }
+
+  removeExports(
+    clientRouteModuleAst,
+    getClientRouteModuleExportsToRemove({ isServerFirstRoute }),
+  );
+
+  return babel.generate(clientRouteModuleAst);
 }
 
 export function parseRouteExports(code: string) {
@@ -338,4 +361,99 @@ function isRootRouteFile({
 }): boolean {
   const filePath = id.split("?")[0];
   return filePath === rootRouteFile;
+}
+
+function getClientRouteModuleExportsToRemove({
+  isServerFirstRoute,
+}: {
+  isServerFirstRoute: boolean;
+}) {
+  return isServerFirstRoute
+    ? [...SERVER_ONLY_ROUTE_EXPORTS, ...CLIENT_COMPONENT_EXPORTS]
+    : SERVER_ONLY_ROUTE_EXPORTS;
+}
+
+function parseRawRouteExports(code: string) {
+  const ast = babel.parse(code, {
+    sourceType: "module",
+    plugins: ["jsx", "typescript"],
+  });
+  const staticExports: string[] = [];
+
+  babel.traverse(ast, {
+    ExportNamedDeclaration(path) {
+      if (path.node.exportKind === "type") return;
+
+      if (path.node.declaration) {
+        for (const name of getExportDeclarationNames(path.node.declaration)) {
+          staticExports.push(name);
+        }
+      }
+
+      for (const specifier of path.node.specifiers) {
+        if (
+          specifier.type !== "ExportSpecifier" ||
+          specifier.exportKind === "type"
+        ) {
+          continue;
+        }
+
+        staticExports.push(
+          specifier.exported.type === "Identifier"
+            ? specifier.exported.name
+            : specifier.exported.value,
+        );
+      }
+    },
+    ExportDefaultDeclaration() {
+      staticExports.push("default");
+    },
+  });
+
+  return {
+    ast,
+    staticExports,
+    isServerFirstRoute: staticExports.includes("ServerComponent"),
+  };
+}
+
+function getExportDeclarationNames(
+  declaration: babel.Babel.Statement,
+): string[] {
+  switch (declaration.type) {
+    case "VariableDeclaration":
+      return declaration.declarations.flatMap((entry) =>
+        getBindingNames(entry.id),
+      );
+    case "FunctionDeclaration":
+    case "ClassDeclaration":
+      return declaration.id ? [declaration.id.name] : [];
+    default:
+      return [];
+  }
+}
+
+function getBindingNames(pattern: babel.Babel.LVal): string[] {
+  switch (pattern.type) {
+    case "Identifier":
+      return [pattern.name];
+    case "ObjectPattern":
+      return pattern.properties.flatMap((property) => {
+        if (property.type === "ObjectProperty") {
+          return getBindingNames(property.value as babel.Babel.LVal);
+        }
+
+        return getBindingNames(property.argument);
+      });
+    case "ArrayPattern":
+      return pattern.elements.flatMap((element) =>
+        element ? getBindingNames(element) : [],
+      );
+    case "AssignmentPattern":
+      return getBindingNames(pattern.left);
+    case "RestElement":
+      return getBindingNames(pattern.argument);
+    default:
+      return [];
+  }
 }
