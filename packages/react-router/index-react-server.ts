@@ -47,6 +47,9 @@ export {
   StaticRouter,
   StaticRouterProvider,
   unstable_HistoryRouter,
+  unstable_useRoute,
+  useRouteLoaderData,
+  // @ts-ignore There are no types before the tsup build when used internally.
 } from "react-router/internal/react-server-client";
 
 // Shared implementation of agnostic APIs
