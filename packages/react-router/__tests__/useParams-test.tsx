@@ -134,6 +134,25 @@ describe("useParams", () => {
         </pre>
       `);
     });
+
+    it("recovers browser-normalized params with stray percent signs", () => {
+      let renderer: TestRenderer.ReactTestRenderer;
+      TestRenderer.act(() => {
+        renderer = TestRenderer.create(
+          <MemoryRouter initialEntries={["/blog/2%%200%20g%20-%202"]}>
+            <Routes>
+              <Route path="/blog/:slug" element={<ShowParams />} />
+            </Routes>
+          </MemoryRouter>,
+        );
+      });
+
+      expect(renderer.toJSON()).toMatchInlineSnapshot(`
+        <pre>
+          {"slug":"2% 0 g - 2"}
+        </pre>
+      `);
+    });
   });
 
   describe("when the path has a + character", () => {

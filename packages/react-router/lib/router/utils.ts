@@ -1652,20 +1652,33 @@ export function compilePath(
 }
 
 export function decodePath(value: string) {
+  return value
+    .split("/")
+    .map((segment) => decodePathSegment(value, segment))
+    .join("/");
+}
+
+function decodePathSegment(pathname: string, segment: string) {
   try {
-    return value
-      .split("/")
-      .map((v) => decodeURIComponent(v).replace(/\//g, "%2F"))
-      .join("/");
+    return decodeURIComponent(segment).replace(/\//g, "%2F");
   } catch (error) {
+    let escapedSegment = segment.replace(/%(?![0-9A-Fa-f]{2})/g, "%25");
+
+    if (escapedSegment !== segment) {
+      try {
+        let decoded = decodeURIComponent(escapedSegment).replace(/\//g, "%2F");
+        if (decoded !== segment) return decoded;
+      } catch {}
+    }
+
     warning(
       false,
-      `The URL path "${value}" could not be decoded because it is a ` +
+      `The URL path "${pathname}" could not be decoded because it is a ` +
         `malformed URL segment. This is probably due to a bad percent ` +
         `encoding (${error}).`,
     );
 
-    return value;
+    return segment;
   }
 }
 
