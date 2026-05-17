@@ -1,8 +1,11 @@
 /* eslint-disable jest/expect-expect */
 
+import { JSDOM } from "jsdom";
+
 import {
   type BrowserHistory,
   createBrowserHistory,
+  createBrowserURLImpl,
 } from "../../lib/router/history";
 
 import InitialLocationDefaultKey from "./TestSequences/InitialLocationDefaultKey";
@@ -45,6 +48,20 @@ describe("a browser history", () => {
   it("knows how to create hrefs from strings", () => {
     const href = history.createHref("/the/path?the=query#the-hash");
     expect(href).toEqual("/the/path?the=query#the-hash");
+  });
+
+  it("creates URLs from the provided window", () => {
+    let customWindow = new JSDOM(`<!DOCTYPE html>`, {
+      url: "https://example.test/start",
+    }).window as unknown as Window;
+    history = createBrowserHistory({ window: customWindow });
+
+    expect(history.createURL("/the/path").href).toEqual(
+      "https://example.test/the/path",
+    );
+    expect(
+      createBrowserURLImpl("//example.test/the/path", true, customWindow).href,
+    ).toEqual("https://example.test/the/path");
   });
 
   it("does not encode the generated path", () => {
